@@ -1,5 +1,5 @@
 from hashlib import new
-from typing import List, Tuple
+from typing import Any, List, Tuple
 import math
 import numpy as np
 from domain.Graph import Graph
@@ -11,25 +11,21 @@ class Construct_Solution:
     list: List[Tuple[float]]
     nodes: int
     start_time: int
+    time_to_execute: int
+    final_result: Any
 
-    def __init__(self, graph: Graph) -> None:
+    def __init__(self, graph: Graph, time_to_execute: int) -> None:
         self.list = graph.get_list_representation()
         self.nodes = graph.nodes_number
+        self.time_to_execute = time_to_execute
         self.start_time = time.time()
-        x = self.construct()[0]
-        # edges = self.get_edges_from_solution(x)
-        # self.sa([[0, 1], [1, 4], [4, 5], [5, 2], [
-        #         2, 3], [3, 0]], [0, 1, 4, 5, 2, 3, 0])
-
-        # print(self.opt3([0, 1, 4, 5, 2, 3, 0]))
+        x = self.construct()
         self.sa(x)
 
     def construct(self):
         current = random.randrange(0, self.nodes)
         solution = self.make_solution(current)
         final = [solution, self.calc(solution)]
-
-        # print(sorted(LRC, key=lambda x: x[1])[0])
         return final
 
     def make_solution(self, init):
@@ -38,15 +34,13 @@ class Construct_Solution:
         while len(solution) != len(self.list):
             min = (None, float('inf'))
             for node in next_nodes:
-                not_in_solution = all(x != node[0] for x in solution)
                 minor = min[1] > node[1]
-                if minor and not_in_solution:
+                if minor and node[0] not in solution:
                     min = node
             current = min[0]
             solution.append(min[0])
             next_nodes = self.list[current]
         solution.append(init)
-        # print(solution)
         return solution
 
     def calc(self, solution):
@@ -91,7 +85,7 @@ class Construct_Solution:
         new_solution.append(new_solution[0])
         return new_solution
 
-    def opt3(self, solution):
+    def opt3(self, solution, value):
         without_cycle = solution[:len(solution) - 1]
         slicesF = []
         slicesS = []
@@ -113,7 +107,23 @@ class Construct_Solution:
                 control.append(v)
             else:
                 control.append(None)
-        return self.combine(control, slicesF + slicesS, len(slicesF))
+        solutions = self.combine(control, slicesF + slicesS, len(slicesF))
+        result = []
+        for s in solutions:
+            result.append([s, self.calculate_again(solution, s, value)])
+        return result
+
+    def calculate_again(self, base, new, value):
+        edges_base = self.get_edges_from_solution(base)
+        edges_new = self.get_edges_from_solution(new)
+        new_value = value
+        for i, v in enumerate(edges_base):
+            if v[0] != edges_new[i][0] or v[1] != edges_new[i][1]:
+                to_remove = self.calc(v)
+                new_value = new_value - to_remove
+                to_add = self.calc(edges_new[i])
+                new_value = new_value + to_add
+        return new_value
 
     def combine(self, control, slice, n):
         inverted = slice[::-1]
@@ -135,17 +145,20 @@ class Construct_Solution:
                     f.append(c)
             f.append(f[0])
             solutions.append(f)
+
         return solutions
 
-    def opt2(self, solution):
+    def opt2(self, solution, value):
         slice = []
         while len(slice) < 2:
             number = random.randrange(0, len(solution) - 1)
-            if all(x != number for x in slice):
+            if number not in slice:
                 slice.append(number)
 
         slice = sorted(slice, key=lambda x: x)
-        return self.swap(solution[:len(solution) - 1], slice[0], slice[1])
+        new_solution = self.swap(
+            solution[:len(solution) - 1], slice[0], slice[1])
+        return [new_solution, self.calculate_again(solution, new_solution, value)]
 
     def get_initial_temp(self, neighborhoods):
         dif = 0
@@ -157,28 +170,30 @@ class Construct_Solution:
         CONSTANT = -0.22314355131
         return - (dif / CONSTANT)
 
-    def sa(self, solution):
-        neighborhoods = []
-        for _ in range(100):
-            s = self.opt2(solution)
-            neighborhoods.append([s, self.calc(s)])
-        best = [solution, self.calc(solution)]
-        temp = self.get_initial_temp(neighborhoods)
-        ITER_MAX = 3
-        g = best
+    def sa(self, initial_value):
+        solution = initial_value[0]
+        FO = initial_value[1]
+        best = [solution, FO]
+        temp = self.get_initial_temp(
+            self.opt3(solution, FO) + self.opt3(solution, FO))
+        ITER_MAX = 2
         current = best
-        while not np.isclose(temp, 0, rtol=1e-20, atol=1e-20, equal_nan=False):
+
+        while not np.isclose(temp, 0, rtol=1e-20, atol=1e-20, equal_nan=False) and time.time() - self.start_time < self.time_to_execute:
             for _ in range(ITER_MAX):
                 new_neighborhood = []
-                next = self.opt3(current[0]) + self.opt3(best[0])
-                for _ in range(5):
-                    next.append(self.opt2(best[0]))
-                for _ in range(5):
-                    next.append(self.opt2(current[0]))
-                for n in next:
-                    new_neighborhood.append([n, self.calc(n)])
-                best_neighbor = sorted(
-                    new_neighborhood, key=lambda x: x[1])[0]
+
+                for _ in range(6):
+                    new_neighborhood.append(self.opt2(best[0],
+                                                      best[1]))
+
+                for _ in range(1):
+                    new_neighborhood.append(self.opt2(current[0],
+                                                      current[1]))
+
+                sorter = sorted(
+                    new_neighborhood, key=lambda x: x[1])
+                best_neighbor = sorter[0]
                 delta = best_neighbor[1] - current[1]
                 if delta < 0:
                     current = best_neighbor
@@ -188,18 +203,7 @@ class Construct_Solution:
                     rand = random.random()
                     salt = math.pow(math.e, -(delta / temp))
                     if rand < salt:
-                        current = sorted(
-                            new_neighborhood, key=lambda x: x[1])[:15][random.randrange(0, 15)]
-            t = time.time() - self.start_time
-            if t > 60:
-                print('Tempo acabou!', {t})
-                break
-            print('---------------------')
+                        current = sorter[random.randrange(
+                            0, 3)]
             temp = 0.65 * temp
-            print(f'atual: {current[1]}')
-            print(f'temperatura: {temp}')
-            print(F'MELHOR: {best[1]}')
-            print('---------------------')
-        print(time.time())
-        print('b', best[1])
-        print('g', g[1])
+        self.final_result = best
